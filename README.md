@@ -1,4 +1,5 @@
 # aegis-cli
+<img width="1103" height="245" alt="Screenshot 2026-02-24 at 5 21 27 PM" src="https://github.com/user-attachments/assets/e059598a-ca90-4870-9946-48fc8b32e7c4" />
 
 A lightweight CLI tool for tracking deep work sessions and distraction impulses. Built in Go, runs locally, no external services.
 
