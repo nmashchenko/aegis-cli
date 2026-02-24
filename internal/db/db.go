@@ -262,6 +262,15 @@ func (db *DB) GetRecentTasks(limit int) ([]models.TaskHistory, error) {
 	return results, rows.Err()
 }
 
+// DeleteTask deletes a single task and its associated urges.
+func (db *DB) DeleteTask(id int64) error {
+	_, err := db.conn.Exec("DELETE FROM urges WHERE task_id = ?; DELETE FROM tasks WHERE id = ?;", id, id)
+	if err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+	return nil
+}
+
 // ResetAll deletes all tasks and urges, resetting the database to a fresh state.
 func (db *DB) ResetAll() error {
 	_, err := db.conn.Exec("DELETE FROM urges; DELETE FROM tasks;")
