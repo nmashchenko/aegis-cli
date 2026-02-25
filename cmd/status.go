@@ -21,7 +21,11 @@ var statusCmd = &cobra.Command{
 			fmt.Fprintln(os.Stdout, "No active task.")
 			return nil
 		}
-		fmt.Fprintf(os.Stdout, "Active task: %s\nElapsed: %s\n", result.TaskName, format.Duration(result.Elapsed))
+		state := "Active"
+		if result.Paused {
+			state = "Paused"
+		}
+		fmt.Fprintf(os.Stdout, "%s task: %s\nElapsed: %s\n", state, result.TaskName, format.Duration(result.Elapsed))
 		return nil
 	},
 }

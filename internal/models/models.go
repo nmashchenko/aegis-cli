@@ -3,12 +3,14 @@ package models
 import "time"
 
 type Task struct {
-	ID              int64
-	Name            string
-	StartedAt       time.Time
-	EndedAt         *time.Time
-	DurationSeconds *int64
-	LimitSeconds    *int64
+	ID                 int64
+	Name               string
+	StartedAt          time.Time
+	EndedAt            *time.Time
+	DurationSeconds    *int64
+	LimitSeconds       *int64
+	PausedAt           *time.Time
+	TotalPausedSeconds int64
 }
 
 type Urge struct {

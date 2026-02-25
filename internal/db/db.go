@@ -74,6 +74,14 @@ var migrations = []func(tx *sql.Tx) error{
 		`)
 		return err
 	},
+	// 2: add pause columns to tasks
+	func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			ALTER TABLE tasks ADD COLUMN paused_at DATETIME;
+			ALTER TABLE tasks ADD COLUMN total_paused_seconds INTEGER NOT NULL DEFAULT 0;
+		`)
+		return err
+	},
 	// future migrations append here
 }
 
@@ -177,7 +185,7 @@ func parseTime(s string) (time.Time, error) {
 
 func (db *DB) GetActiveTask() (*models.Task, error) {
 	row := db.conn.QueryRow(
-		"SELECT id, name, started_at, ended_at, duration_seconds, limit_seconds FROM tasks WHERE ended_at IS NULL LIMIT 1",
+		"SELECT id, name, started_at, ended_at, duration_seconds, limit_seconds, paused_at, total_paused_seconds FROM tasks WHERE ended_at IS NULL LIMIT 1",
 	)
 
 	var task models.Task
@@ -185,8 +193,10 @@ func (db *DB) GetActiveTask() (*models.Task, error) {
 	var endedAt sql.NullString
 	var durationSeconds sql.NullInt64
 	var limitSeconds sql.NullInt64
+	var pausedAt sql.NullString
+	var totalPausedSeconds int64
 
-	err := row.Scan(&task.ID, &task.Name, &startedAt, &endedAt, &durationSeconds, &limitSeconds)
+	err := row.Scan(&task.ID, &task.Name, &startedAt, &endedAt, &durationSeconds, &limitSeconds, &pausedAt, &totalPausedSeconds)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -214,16 +224,64 @@ func (db *DB) GetActiveTask() (*models.Task, error) {
 		task.LimitSeconds = &limitSeconds.Int64
 	}
 
+	if pausedAt.Valid {
+		t, err := parseTime(pausedAt.String)
+		if err != nil {
+			return nil, fmt.Errorf("parse paused_at: %w", err)
+		}
+		task.PausedAt = &t
+	}
+
+	task.TotalPausedSeconds = totalPausedSeconds
+
 	return &task, nil
 }
 
-func (db *DB) StopTask(id int64) error {
-	// Read started_at and compute duration in Go, because SQLite's julianday()
-	// cannot parse the timestamp format that modernc.org/sqlite produces.
-	var startedAtStr string
-	err := db.conn.QueryRow("SELECT started_at FROM tasks WHERE id = ? AND ended_at IS NULL", id).Scan(&startedAtStr)
+func (db *DB) PauseTask(id int64) error {
+	_, err := db.conn.Exec(
+		"UPDATE tasks SET paused_at = ? WHERE id = ? AND ended_at IS NULL AND paused_at IS NULL",
+		time.Now().UTC(), id,
+	)
 	if err != nil {
-		return fmt.Errorf("get task start time: %w", err)
+		return fmt.Errorf("pause task: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) ResumeTask(id int64) error {
+	var pausedAtStr string
+	err := db.conn.QueryRow("SELECT paused_at FROM tasks WHERE id = ? AND paused_at IS NOT NULL", id).Scan(&pausedAtStr)
+	if err != nil {
+		return fmt.Errorf("get paused_at: %w", err)
+	}
+
+	pausedAt, err := parseTime(pausedAtStr)
+	if err != nil {
+		return fmt.Errorf("parse paused_at: %w", err)
+	}
+
+	pausedSecs := int64(time.Since(pausedAt).Seconds())
+
+	_, err = db.conn.Exec(
+		"UPDATE tasks SET paused_at = NULL, total_paused_seconds = total_paused_seconds + ? WHERE id = ?",
+		pausedSecs, id,
+	)
+	if err != nil {
+		return fmt.Errorf("resume task: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) StopTask(id int64) error {
+	var startedAtStr string
+	var pausedAtStr sql.NullString
+	var totalPausedSeconds int64
+	err := db.conn.QueryRow(
+		"SELECT started_at, paused_at, total_paused_seconds FROM tasks WHERE id = ? AND ended_at IS NULL",
+		id,
+	).Scan(&startedAtStr, &pausedAtStr, &totalPausedSeconds)
+	if err != nil {
+		return fmt.Errorf("get task times: %w", err)
 	}
 
 	startedAt, err := parseTime(startedAtStr)
@@ -232,11 +290,21 @@ func (db *DB) StopTask(id int64) error {
 	}
 
 	now := time.Now().UTC()
-	durationSecs := int64(now.Sub(startedAt).Seconds())
+
+	// If paused, accumulate the final pause chunk
+	if pausedAtStr.Valid {
+		pausedAt, err := parseTime(pausedAtStr.String)
+		if err != nil {
+			return fmt.Errorf("parse paused_at: %w", err)
+		}
+		totalPausedSeconds += int64(now.Sub(pausedAt).Seconds())
+	}
+
+	durationSecs := int64(now.Sub(startedAt).Seconds()) - totalPausedSeconds
 
 	_, err = db.conn.Exec(
-		`UPDATE tasks SET ended_at = ?, duration_seconds = ? WHERE id = ? AND ended_at IS NULL`,
-		now, durationSecs, id,
+		"UPDATE tasks SET ended_at = ?, duration_seconds = ?, paused_at = NULL, total_paused_seconds = ? WHERE id = ? AND ended_at IS NULL",
+		now, durationSecs, totalPausedSeconds, id,
 	)
 	if err != nil {
 		return fmt.Errorf("stop task: %w", err)

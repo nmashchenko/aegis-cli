@@ -52,6 +52,16 @@ aegis urge
 
 In live TUI mode, press `u` to log an urge without leaving the session. At 3, 5, and 10 urges, a research paper highlight about dopamine and addiction is shown to help you stay focused.
 
+### Pause and resume
+
+```bash
+# Detached mode
+aegis pause
+aegis resume
+```
+
+In live TUI mode, press `p` to toggle pause/resume. While paused, the timer freezes, the UI dims, and urge logging is disabled. Paused time is excluded from your final duration.
+
 ### Stop a task
 
 ```bash

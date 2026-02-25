@@ -78,6 +78,10 @@ type Model struct {
 	quitting   bool
 	stopResult *session.StopResult
 
+	paused         bool
+	pausedAt       time.Time
+	totalPausedDur time.Duration
+
 	shownHighlight    *models.PaperHighlight
 	lastHighlightMood urgeMood
 
@@ -141,6 +145,15 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(tickEvery(), m.spinner.Tick)
 }
 
+func (m Model) effectiveElapsed() time.Duration {
+	elapsed := time.Since(m.startedAt)
+	paused := m.totalPausedDur
+	if m.paused {
+		paused += time.Since(m.pausedAt)
+	}
+	return elapsed - paused
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -152,7 +165,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.quitting = true
 			return m, tea.Quit
+		case "p":
+			if m.paused {
+				// Resume
+				m.totalPausedDur += time.Since(m.pausedAt)
+				m.paused = false
+				_, _ = m.sessionSvc.Resume()
+			} else {
+				// Pause
+				m.paused = true
+				m.pausedAt = time.Now()
+				_, _ = m.sessionSvc.Pause()
+			}
+			return m, nil
 		case "u":
+			if m.paused {
+				return m, nil
+			}
 			_, err := m.sessionSvc.LogUrge()
 			if err == nil {
 				m.urgeCount++
@@ -176,7 +205,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tickEvery())
 
 		if m.limit != nil {
-			elapsed := time.Since(m.startedAt)
+			elapsed := m.effectiveElapsed()
 			ratio := float64(elapsed) / float64(*m.limit)
 			if ratio > 1 {
 				ratio = 1
@@ -211,11 +240,16 @@ func (m Model) View() string {
 	}
 
 	mood := deriveMood(m.urgeCount)
-	elapsed := time.Since(m.startedAt)
+	elapsed := m.effectiveElapsed()
 
 	// --- Compute colors ---
 	borderColor := m.gradientBorderColor(mood)
 	timerColor := m.breathingColor(borderColor, mood)
+
+	if m.paused {
+		timerColor = mustParseHex("#6B7280")
+		borderColor = mustParseHex("#4B5563")
+	}
 
 	// --- Build card content ---
 	var lines []string
@@ -227,6 +261,14 @@ func (m Model) View() string {
 	spinnerStr := m.styledSpinner(mood, borderColor)
 	taskLine := spinnerStr + " " + lipgloss.NewStyle().Bold(true).Render(m.taskName)
 	lines = append(lines, taskLine)
+
+	if m.paused {
+		pausedLabel := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Bold(true).
+			Render("⏸  PAUSED")
+		lines = append(lines, pausedLabel)
+	}
 
 	lines = append(lines, "")
 
@@ -276,7 +318,11 @@ func (m Model) View() string {
 
 	// Help footer
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	lines = append(lines, helpStyle.Render("u: log urge  |  q: stop session"))
+	if m.paused {
+		lines = append(lines, helpStyle.Render("p: resume  |  q: stop session"))
+	} else {
+		lines = append(lines, helpStyle.Render("u: log urge  |  p: pause  |  q: stop session"))
+	}
 
 	lines = append(lines, "")
 

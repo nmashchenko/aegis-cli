@@ -148,6 +148,88 @@ func TestGetUrgeCountForTask(t *testing.T) {
 	}
 }
 
+func TestPauseTask(t *testing.T) {
+	db := setupTestDB(t)
+
+	id, err := db.CreateTask("coding", nil)
+	if err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	err = db.PauseTask(id)
+	if err != nil {
+		t.Fatalf("PauseTask failed: %v", err)
+	}
+
+	task, err := db.GetActiveTask()
+	if err != nil {
+		t.Fatalf("GetActiveTask failed: %v", err)
+	}
+	if task.PausedAt == nil {
+		t.Fatal("expected PausedAt to be set")
+	}
+}
+
+func TestResumeTask(t *testing.T) {
+	db := setupTestDB(t)
+
+	id, err := db.CreateTask("coding", nil)
+	if err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	err = db.PauseTask(id)
+	if err != nil {
+		t.Fatalf("PauseTask failed: %v", err)
+	}
+
+	// Small sleep so paused duration > 0
+	time.Sleep(10 * time.Millisecond)
+
+	err = db.ResumeTask(id)
+	if err != nil {
+		t.Fatalf("ResumeTask failed: %v", err)
+	}
+
+	task, err := db.GetActiveTask()
+	if err != nil {
+		t.Fatalf("GetActiveTask failed: %v", err)
+	}
+	if task.PausedAt != nil {
+		t.Fatal("expected PausedAt to be nil after resume")
+	}
+	if task.TotalPausedSeconds < 0 {
+		t.Errorf("expected non-negative TotalPausedSeconds, got %d", task.TotalPausedSeconds)
+	}
+}
+
+func TestStopWhilePaused(t *testing.T) {
+	db := setupTestDB(t)
+
+	id, err := db.CreateTask("coding", nil)
+	if err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	err = db.PauseTask(id)
+	if err != nil {
+		t.Fatalf("PauseTask failed: %v", err)
+	}
+
+	err = db.StopTask(id)
+	if err != nil {
+		t.Fatalf("StopTask failed: %v", err)
+	}
+
+	task, err := db.GetActiveTask()
+	if err != nil {
+		t.Fatalf("GetActiveTask failed: %v", err)
+	}
+	if task != nil {
+		t.Error("expected no active task after stop")
+	}
+}
+
 func TestGetStats(t *testing.T) {
 	db := setupTestDB(t)
 

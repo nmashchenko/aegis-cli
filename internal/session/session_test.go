@@ -123,3 +123,99 @@ func TestLogUrge(t *testing.T) {
 		t.Errorf("task name = %q, want %q", result.TaskName, "coding")
 	}
 }
+
+func TestPauseTask(t *testing.T) {
+	svc := setupTest(t)
+
+	_, err := svc.Start("coding", nil)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	result, err := svc.Pause()
+	if err != nil {
+		t.Fatalf("Pause failed: %v", err)
+	}
+	if result.TaskName != "coding" {
+		t.Errorf("task name = %q, want %q", result.TaskName, "coding")
+	}
+}
+
+func TestPauseWithNoActiveTask(t *testing.T) {
+	svc := setupTest(t)
+
+	_, err := svc.Pause()
+	if err == nil {
+		t.Fatal("expected error on pause with no active task")
+	}
+}
+
+func TestResumeTask(t *testing.T) {
+	svc := setupTest(t)
+
+	_, err := svc.Start("coding", nil)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	_, err = svc.Pause()
+	if err != nil {
+		t.Fatalf("Pause failed: %v", err)
+	}
+
+	result, err := svc.Resume()
+	if err != nil {
+		t.Fatalf("Resume failed: %v", err)
+	}
+	if result.TaskName != "coding" {
+		t.Errorf("task name = %q, want %q", result.TaskName, "coding")
+	}
+}
+
+func TestResumeWithNoActiveTask(t *testing.T) {
+	svc := setupTest(t)
+
+	_, err := svc.Resume()
+	if err == nil {
+		t.Fatal("expected error on resume with no active task")
+	}
+}
+
+func TestResumeWhenNotPaused(t *testing.T) {
+	svc := setupTest(t)
+
+	_, err := svc.Start("coding", nil)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	_, err = svc.Resume()
+	if err == nil {
+		t.Fatal("expected error on resume when not paused")
+	}
+}
+
+func TestStatusWhilePaused(t *testing.T) {
+	svc := setupTest(t)
+
+	_, err := svc.Start("coding", nil)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	_, err = svc.Pause()
+	if err != nil {
+		t.Fatalf("Pause failed: %v", err)
+	}
+
+	status, err := svc.Status()
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if !status.Active {
+		t.Error("expected active status")
+	}
+	if !status.Paused {
+		t.Error("expected paused status")
+	}
+}
