@@ -1,3 +1,5 @@
+version: 2
+
 project_name: aegis
 
 builds:
@@ -13,7 +15,8 @@ builds:
       - -s -w -X github.com/nmashchenko/aegis-cli/cmd.Version={{ .Tag }}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
