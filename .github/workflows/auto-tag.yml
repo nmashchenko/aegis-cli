@@ -1,4 +1,4 @@
-name: Auto Tag
+name: Auto Tag & Release
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  tag:
+  tag-and-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +17,7 @@ jobs:
           fetch-depth: 0
 
       - name: Bump patch version and push tag
+        id: tag
         run: |
           LATEST=$(git tag -l 'v*' --sort=-v:refname | head -n1)
           if [ -z "$LATEST" ]; then
@@ -31,3 +32,17 @@ jobs:
           echo "Tagging $NEW"
           git tag "$NEW"
           git push origin "$NEW"
+          echo "tag=$NEW" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.tag }}
