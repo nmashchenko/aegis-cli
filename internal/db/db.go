@@ -41,37 +41,48 @@ func (db *DB) Close() error {
 	return db.conn.Close()
 }
 
+// migrations is an ordered list of schema-only migration functions.
+// Each function receives a transaction and returns an error.
+// Append new migrations to the end; never reorder or remove existing entries.
+var migrations = []func(tx *sql.Tx) error{
+	// 1: initial tables
+	func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS tasks (
+				id               INTEGER PRIMARY KEY AUTOINCREMENT,
+				name             TEXT NOT NULL,
+				started_at       DATETIME NOT NULL,
+				ended_at         DATETIME,
+				duration_seconds INTEGER,
+				limit_seconds    INTEGER
+			);
+
+			CREATE TABLE IF NOT EXISTS urges (
+				id        INTEGER PRIMARY KEY AUTOINCREMENT,
+				timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				task_id   INTEGER,
+				FOREIGN KEY (task_id) REFERENCES tasks(id)
+			);
+
+			CREATE TABLE IF NOT EXISTS papers (
+				id         INTEGER PRIMARY KEY AUTOINCREMENT,
+				mood_tier  TEXT NOT NULL,
+				title      TEXT NOT NULL,
+				url        TEXT NOT NULL,
+				highlight  TEXT NOT NULL
+			);
+		`)
+		return err
+	},
+	// future migrations append here
+}
+
 func (db *DB) migrate() error {
-	_, err := db.conn.Exec(`
-		CREATE TABLE IF NOT EXISTS tasks (
-			id               INTEGER PRIMARY KEY AUTOINCREMENT,
-			name             TEXT NOT NULL,
-			started_at       DATETIME NOT NULL,
-			ended_at         DATETIME,
-			duration_seconds INTEGER,
-			limit_seconds    INTEGER
-		);
-
-		CREATE TABLE IF NOT EXISTS urges (
-			id        INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			task_id   INTEGER,
-			FOREIGN KEY (task_id) REFERENCES tasks(id)
-		);
-
-		CREATE TABLE IF NOT EXISTS papers (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			mood_tier  TEXT NOT NULL,
-			title      TEXT NOT NULL,
-			url        TEXT NOT NULL,
-			highlight  TEXT NOT NULL
-		);
-	`)
-	if err != nil {
+	if err := db.runMigrations(); err != nil {
 		return err
 	}
 
-	// Seed papers if table is empty
+	// Seed papers if table is empty (independent of migrations)
 	var count int
 	if err := db.conn.QueryRow("SELECT COUNT(*) FROM papers").Scan(&count); err != nil {
 		return fmt.Errorf("check papers count: %w", err)
@@ -79,6 +90,49 @@ func (db *DB) migrate() error {
 	if count == 0 {
 		if err := db.seedPapers(); err != nil {
 			return fmt.Errorf("seed papers: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// runMigrations bootstraps the schema_migrations table and applies any
+// pending migrations in order. Each migration runs inside its own transaction.
+func (db *DB) runMigrations() error {
+	_, err := db.conn.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`)
+	if err != nil {
+		return fmt.Errorf("create schema_migrations table: %w", err)
+	}
+
+	for i, fn := range migrations {
+		version := i + 1
+
+		var exists int
+		err := db.conn.QueryRow("SELECT 1 FROM schema_migrations WHERE version = ?", version).Scan(&exists)
+		if err == nil {
+			continue // already applied
+		}
+		if err != sql.ErrNoRows {
+			return fmt.Errorf("check migration %d: %w", version, err)
+		}
+
+		tx, err := db.conn.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration %d: %w", version, err)
+		}
+
+		if err := fn(tx); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("run migration %d: %w", version, err)
+		}
+
+		if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", version); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("record migration %d: %w", version, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %d: %w", version, err)
 		}
 	}
 
