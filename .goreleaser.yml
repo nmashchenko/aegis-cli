@@ -10,7 +10,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
+      - -s -w -X github.com/nmashchenko/aegis-cli/cmd.Version={{ .Tag }}
 
 archives:
   - format: tar.gz
