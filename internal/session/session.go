@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/nmashchenko/aegis-cli/internal/db"
+	"github.com/nmashchenko/aegis-cli/internal/models"
 )
 
 type Service struct {
@@ -122,4 +123,8 @@ func (s *Service) LogUrge() (*UrgeResult, error) {
 
 func (s *Service) GetUrgeCount(taskID int64) (int, error) {
 	return s.db.GetUrgeCountForTask(taskID)
+}
+
+func (s *Service) GetRandomHighlight(moodTier string) (*models.PaperHighlight, error) {
+	return s.db.GetRandomHighlight(moodTier)
 }

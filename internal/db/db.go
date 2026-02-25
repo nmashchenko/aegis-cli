@@ -58,8 +58,31 @@ func (db *DB) migrate() error {
 			task_id   INTEGER,
 			FOREIGN KEY (task_id) REFERENCES tasks(id)
 		);
+
+		CREATE TABLE IF NOT EXISTS papers (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			mood_tier  TEXT NOT NULL,
+			title      TEXT NOT NULL,
+			url        TEXT NOT NULL,
+			highlight  TEXT NOT NULL
+		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Seed papers if table is empty
+	var count int
+	if err := db.conn.QueryRow("SELECT COUNT(*) FROM papers").Scan(&count); err != nil {
+		return fmt.Errorf("check papers count: %w", err)
+	}
+	if count == 0 {
+		if err := db.seedPapers(); err != nil {
+			return fmt.Errorf("seed papers: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func DefaultPath() (string, error) {
@@ -269,6 +292,110 @@ func (db *DB) DeleteTask(id int64) error {
 		return fmt.Errorf("delete task: %w", err)
 	}
 	return nil
+}
+
+// GetDailyUrgeCounts returns urge counts per day between start and end, filling gaps with zero.
+// Groups in Go because SQLite's DATE() cannot parse the timestamp format modernc.org/sqlite produces.
+func (db *DB) GetDailyUrgeCounts(start, end time.Time) ([]models.DailyUrgeCount, error) {
+	rows, err := db.conn.Query(
+		`SELECT timestamp FROM urges
+		 WHERE timestamp >= ? AND timestamp < ?`,
+		start.UTC(), end.UTC(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query urge timestamps: %w", err)
+	}
+	defer rows.Close()
+
+	countMap := make(map[string]int)
+	for rows.Next() {
+		var tsStr string
+		if err := rows.Scan(&tsStr); err != nil {
+			return nil, fmt.Errorf("scan urge timestamp: %w", err)
+		}
+		t, err := parseTime(tsStr)
+		if err != nil {
+			continue
+		}
+		key := t.Local().Format("2006-01-02")
+		countMap[key]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Fill in all days in range
+	var results []models.DailyUrgeCount
+	startDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+	endDay := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, end.Location())
+	for d := startDay; d.Before(endDay); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		results = append(results, models.DailyUrgeCount{
+			Date:  d,
+			Count: countMap[key],
+		})
+	}
+
+	return results, nil
+}
+
+// GetDailyTaskCounts returns completed task counts per day between start and end, filling gaps with zero.
+// Groups in Go because SQLite's DATE() cannot parse the timestamp format modernc.org/sqlite produces.
+func (db *DB) GetDailyTaskCounts(start, end time.Time) ([]models.DailyUrgeCount, error) {
+	rows, err := db.conn.Query(
+		`SELECT started_at FROM tasks
+		 WHERE ended_at IS NOT NULL
+		   AND started_at >= ? AND started_at < ?`,
+		start.UTC(), end.UTC(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query task timestamps: %w", err)
+	}
+	defer rows.Close()
+
+	countMap := make(map[string]int)
+	for rows.Next() {
+		var tsStr string
+		if err := rows.Scan(&tsStr); err != nil {
+			return nil, fmt.Errorf("scan task timestamp: %w", err)
+		}
+		t, err := parseTime(tsStr)
+		if err != nil {
+			continue
+		}
+		key := t.Local().Format("2006-01-02")
+		countMap[key]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var results []models.DailyUrgeCount
+	startDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+	endDay := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, end.Location())
+	for d := startDay; d.Before(endDay); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		results = append(results, models.DailyUrgeCount{
+			Date:  d,
+			Count: countMap[key],
+		})
+	}
+
+	return results, nil
+}
+
+// GetRandomHighlight returns a random paper highlight for the given mood tier.
+func (db *DB) GetRandomHighlight(moodTier string) (*models.PaperHighlight, error) {
+	row := db.conn.QueryRow(
+		"SELECT title, url, highlight FROM papers WHERE mood_tier = ? ORDER BY RANDOM() LIMIT 1",
+		moodTier,
+	)
+	var h models.PaperHighlight
+	err := row.Scan(&h.Title, &h.URL, &h.Highlight)
+	if err != nil {
+		return nil, fmt.Errorf("get random highlight: %w", err)
+	}
+	return &h, nil
 }
 
 // ResetAll deletes all tasks and urges, resetting the database to a fresh state.

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/nmashchenko/aegis-cli/internal/format"
+	"github.com/nmashchenko/aegis-cli/internal/models"
 	"github.com/nmashchenko/aegis-cli/internal/session"
 )
 
@@ -36,6 +37,19 @@ func deriveMood(urgeCount int) urgeMood {
 		return moodAnnoyed
 	default:
 		return moodCalm
+	}
+}
+
+func moodTier(m urgeMood) string {
+	switch m {
+	case moodAnnoyed:
+		return "annoyed"
+	case moodAngry:
+		return "angry"
+	case moodChaos:
+		return "chaos"
+	default:
+		return ""
 	}
 }
 
@@ -63,6 +77,9 @@ type Model struct {
 	sessionSvc *session.Service
 	quitting   bool
 	stopResult *session.StopResult
+
+	shownHighlight    *models.PaperHighlight
+	lastHighlightMood urgeMood
 
 	spinner    spinner.Model
 	progress   progress.Model
@@ -139,6 +156,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_, err := m.sessionSvc.LogUrge()
 			if err == nil {
 				m.urgeCount++
+				newMood := deriveMood(m.urgeCount)
+				tier := moodTier(newMood)
+				if tier != "" && newMood != m.lastHighlightMood {
+					h, err := m.sessionSvc.GetRandomHighlight(tier)
+					if err == nil {
+						m.shownHighlight = h
+						m.lastHighlightMood = newMood
+					}
+				}
 			}
 			return m, nil
 		}
@@ -181,10 +207,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if m.quitting && m.stopResult != nil {
-		return fmt.Sprintf("\nTask stopped: %s\nDuration: %s\n",
-			m.stopResult.TaskName,
-			format.Duration(m.stopResult.Duration),
-		)
+		return m.renderSummary()
 	}
 
 	mood := deriveMood(m.urgeCount)
@@ -229,6 +252,18 @@ func (m Model) View() string {
 	urgeText := fmt.Sprintf("Urges: %d%s", m.urgeCount, moodEmoji(mood))
 	urgeStyle := m.urgeStyle(mood)
 	lines = append(lines, urgeStyle.Render(urgeText))
+
+	// Paper highlight
+	if m.shownHighlight != nil {
+		lines = append(lines, "")
+		dimItalic := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Italic(true)
+		dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+		lines = append(lines, dimItalic.Render(fmt.Sprintf("\"%s\"", m.shownHighlight.Highlight)))
+		lines = append(lines, dim.Render(fmt.Sprintf("— %s", m.shownHighlight.Title)))
+		// OSC 8 clickable hyperlink
+		link := fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", m.shownHighlight.URL, m.shownHighlight.URL)
+		lines = append(lines, dim.Render(link))
+	}
 
 	lines = append(lines, "")
 
@@ -366,6 +401,73 @@ func (m *Model) applyProgressColors(mood urgeMood) {
 		m.progress.FullColor = "#22C55E"
 		m.progress.EmptyColor = "#1C1917"
 	}
+}
+
+func (m Model) renderSummary() string {
+	mood := deriveMood(m.urgeCount)
+
+	// Pick border/accent color based on how the session went
+	var accentColor string
+	switch mood {
+	case moodChaos:
+		accentColor = "#EF4444"
+	case moodAngry:
+		accentColor = "#EF4444"
+	case moodAnnoyed:
+		accentColor = "#F59E0B"
+	default:
+		accentColor = "#22C55E"
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A855F7"))
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	valueStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
+	urgeValStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(accentColor))
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, titleStyle.Render("Session Complete"))
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.stopResult.TaskName))
+	lines = append(lines, "")
+	type row struct {
+		label    string
+		value    string
+		style    lipgloss.Style
+		suffix   string
+	}
+	rows := []row{
+		{"Duration:", format.Duration(m.stopResult.Duration), valueStyle, ""},
+		{"Urges:", fmt.Sprintf("%d", m.urgeCount), urgeValStyle, moodEmoji(mood)},
+	}
+
+	maxLabelLen := 0
+	for _, r := range rows {
+		if len(r.label) > maxLabelLen {
+			maxLabelLen = len(r.label)
+		}
+	}
+
+	for _, r := range rows {
+		pad := strings.Repeat(" ", maxLabelLen-len(r.label))
+		lines = append(lines, fmt.Sprintf("%s%s %s%s",
+			labelStyle.Render(r.label), pad,
+			r.style.Render(r.value),
+			r.suffix,
+		))
+	}
+	lines = append(lines, "")
+
+	content := strings.Join(lines, "\n")
+
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(accentColor)).
+		Padding(0, 2).
+		Width(cardWidth).
+		Render(content)
+
+	return "\n" + card + "\n"
 }
 
 func formatTimer(d time.Duration) string {

@@ -8,9 +8,9 @@ import (
 )
 
 var statsCmd = &cobra.Command{
-	Use:   "stats [today|week|month|year]",
+	Use:   "stats [day|week|month|year]",
 	Short: "Show focus stats",
-	Long:  "Show aggregated focus stats. Defaults to today.",
+	Long:  "Show aggregated focus stats with urge chart. Defaults to week.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		period := ""

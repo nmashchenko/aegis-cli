@@ -32,3 +32,20 @@ type TaskHistory struct {
 	DurationSeconds int64
 	UrgeCount       int
 }
+
+type DailyUrgeCount struct {
+	Date  time.Time
+	Count int
+}
+
+type StatBucket struct {
+	Label string
+	Tasks int
+	Urges int
+}
+
+type PaperHighlight struct {
+	Title     string
+	URL       string
+	Highlight string
+}

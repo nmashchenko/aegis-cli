@@ -14,10 +14,11 @@ func TestPeriodToTimeRange(t *testing.T) {
 		wantErr   bool
 	}{
 		{"today", "Today", false},
+		{"day", "Today", false},
 		{"week", "Last 7 Days", false},
-		{"month", "Last 30 Days", false},
-		{"year", "Last 365 Days", false},
-		{"", "Today", false},
+		{"month", "February 2026", false},
+		{"year", "2026", false},
+		{"", "Last 7 Days", false},
 		{"invalid", "", true},
 	}
 
@@ -49,6 +50,53 @@ func TestPeriodToday(t *testing.T) {
 	}
 	expectedStart := time.Date(2026, 2, 23, 0, 0, 0, 0, time.Local)
 	expectedEnd := time.Date(2026, 2, 24, 0, 0, 0, 0, time.Local)
+	if !start.Equal(expectedStart) {
+		t.Errorf("start = %v, want %v", start, expectedStart)
+	}
+	if !end.Equal(expectedEnd) {
+		t.Errorf("end = %v, want %v", end, expectedEnd)
+	}
+}
+
+func TestDayAlias(t *testing.T) {
+	now := time.Date(2026, 2, 23, 15, 30, 0, 0, time.Local)
+	startDay, endDay, labelDay, err := PeriodToTimeRange("day", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startToday, endToday, labelToday, err := PeriodToTimeRange("today", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !startDay.Equal(startToday) || !endDay.Equal(endToday) || labelDay != labelToday {
+		t.Errorf("day and today should produce identical results")
+	}
+}
+
+func TestMonthCalendarBounds(t *testing.T) {
+	now := time.Date(2026, 2, 23, 15, 30, 0, 0, time.Local)
+	start, end, _, err := PeriodToTimeRange("month", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedStart := time.Date(2026, 2, 1, 0, 0, 0, 0, time.Local)
+	expectedEnd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.Local)
+	if !start.Equal(expectedStart) {
+		t.Errorf("start = %v, want %v", start, expectedStart)
+	}
+	if !end.Equal(expectedEnd) {
+		t.Errorf("end = %v, want %v", end, expectedEnd)
+	}
+}
+
+func TestYearCalendarBounds(t *testing.T) {
+	now := time.Date(2026, 2, 23, 15, 30, 0, 0, time.Local)
+	start, end, _, err := PeriodToTimeRange("year", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)
+	expectedEnd := time.Date(2027, 1, 1, 0, 0, 0, 0, time.Local)
 	if !start.Equal(expectedStart) {
 		t.Errorf("start = %v, want %v", start, expectedStart)
 	}
